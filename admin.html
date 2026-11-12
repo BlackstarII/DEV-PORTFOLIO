@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEVAULT // Control Center &amp; CMS</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2305070a'/><path d='M25 25 L45 25 L50 48 L42 58 Z' fill='%23ffffff'/><path d='M75 25 L55 25 L42 58 L50 68 Z' fill='%2338bdf8'/><path d='M45 60 L55 60 L55 75 L45 75 Z' fill='%23ffffff'/></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Space Grotesk', -apple-system, sans-serif;
+      background-color: #030508;
+      color: #e2e8f0;
+      overflow-x: hidden;
+    }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .font-display { font-family: 'Chakra Petch', sans-serif; }
+    .cyber-glow { box-shadow: 0 0 25px rgba(56, 189, 248, 0.15); }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeIn { animation: fadeIn 0.35s ease-out forwards; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-sky-500 selection:text-black">
+
+  <!-- Interactive 3D WebGL Canvas Layer -->
+  <div id="three-canvas-bg" class="fixed inset-0 pointer-events-none z-0 opacity-40"></div>
+
+  <!-- Background Gradients and Matrix Overlay -->
+  <div class="fixed inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:24px_24px] z-0"></div>
+  <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[700px] h-[350px] bg-sky-500/10 blur-[130px] pointer-events-none z-0"></div>
+
+  <div id="app" class="relative z-10 flex-1 flex flex-col"></div>
+
+  <script>
+    // ========================================================
+    // ZERO TRUST 2-STEP AUTH CONFIGURATION
+    // ========================================================
+    const MASTER_HASH = '2451eafa3bfdda3304a11ef509d6203308d249972b3d93e6ef9a4d0559d9bfab'; // dev@0987
+    const CHALLENGE_HASH = '043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89'; // 's'
+
+    const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('devault_portfolio_sync') : null;
+
+    let isAuthenticated = sessionStorage.getItem('devault_admin_auth') === 'true';
+    let authStep = 1;
+
+    // ========================================================
+    // PROGRESSIVE LOCKOUT SYSTEM
+    // ========================================================
+    // Tiers (every 5 consecutive failures):
+    //   5 → 1 min | 10 → 2 min | 15 → 5 min | 20 → 10 min | 25 → 20 min | 30 → 40 min | ...
+    const LOCKOUT_TIERS = [60000, 120000, 300000, 600000, 1200000]; // ms per tier (keeps doubling after last)
+
+    function getLockDuration(tier) {
+      // tier is 1-based (1st block = after 5 fails, 2nd = after 10, ...)
+      if (tier <= LOCKOUT_TIERS.length) return LOCKOUT_TIERS[tier - 1];
+      // After defined tiers, keep doubling from last
+      let d = LOCKOUT_TIERS[LOCKOUT_TIERS.length - 1];
+      for (let i = LOCKOUT_TIERS.length; i < tier; i++) d *= 2;
+      return d;
+    }
+
+    function getFailCount() {
+      return parseInt(localStorage.getItem('devault_fail_count') || '0', 10);
+    }
+
+    function getLockUntil() {
+      return parseInt(localStorage.getItem('devault_lock_until') || '0', 10);
+    }
+
+    function isLocked() {
+      return Date.now() < getLockUntil();
+    }
+
+    function recordFailure() {
+      let count = getFailCount() + 1;
+      localStorage.setItem('devault_fail_count', count);
+      if (count % 5 === 0) {
+        const tier = count / 5;
+        const duration = getLockDuration(tier);
+        localStorage.setItem('devault_lock_until', Date.now() + duration);
+      }
+    }
+
+    function resetFailures() {
+      localStorage.removeItem('devault_fail_count');
+      localStorage.removeItem('devault_lock_until');
+    }
+
+    let _lockCountdownTimer = null;
+
+    function formatDuration(ms) {
+      const s = Math.ceil(ms / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      const rem = s % 60;
+      return rem > 0 ? m + 'm ' + rem + 's' : m + 'm';
+    }
+
+    async function sha256(plaintext) {
+      const enc = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode(plaintext));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    const DEFAULT_BIO = {
+      name: 'YAHIA ELSEMARY',
+      badge: 'AASTMT • CYBER & CREATIVE ENGINEERING',
+      headline: "I BUILD WHAT'S NEXT.",
+      subheadline: 'Creative Developer exploring the intersection of design, engineering, and technology.',
+      tagline: 'DEVAULT // CREATIVE DEV',
+      aboutText: 'Computer engineering undergraduate at the Arab Academy for Science, Technology and Maritime Transport (AASTMT, 2025–Present). Specialized in offensive cybersecurity, WebAR graphics shaders, full-stack architecture, and autonomous AI agents.',
+      statusText: 'Available for high-impact engineering & security collaborations',
+      linkedinUrl: 'https://www.linkedin.com/in/yahia-elsemary-a11930399/',
+      githubUrl: 'https://github.com/BlackstarII',
+      email: 'yaworke@gmail.com',
+      portraitImage: '',
+    };
+
+    const BUILTIN_PROOF = [
+      {
+        id: 'proof-cyctf',
+        title: 'CyCTF 2026 Tournament Certificate',
+        issuer: 'CyCTF Tournament Organizers',
+        summary: 'Official Certificate of Achievement presented to DEVAULT (Team Cykoo) for ranking #123 out of 262 teams on the final scoreboard.',
+        badge: 'Scoreboard Rank #123 • Nov 2026',
+        image: 'assets/cyctf-certificate.jpg',
+        meta: 'Tournament Finalist • Nov 2026',
+        link: ''
+      },
+      {
+        id: 'proof-cisco',
+        title: 'Cisco Ethical Hacker Ceremony Verification',
+        issuer: 'Cisco Networking Academy',
+        summary: 'Graduation from Cisco Networking Academy Ethical Hacker program and attendance at the official ceremony.',
+        badge: 'Cisco Academy • Oct 2026',
+        image: 'assets/yahia-portrait.jpg',
+        meta: 'Cisco Networking Academy • Oct 2026',
+        link: ''
+      },
+      {
+        id: 'proof-military',
+        title: 'Military Academy Certificate & Shield of Honor',
+        issuer: 'Military Academy',
+        summary: 'Awarded official Certificate and commemorative Shield of Honor upon completing the National Security and Strategic Studies program at the Military Academy.',
+        badge: 'Shield of Honor • June 2026',
+        image: 'assets/military-academy-shield.jpg',
+        meta: 'Military Academy • June 2026',
+        link: 'https://www.linkedin.com/posts/yahia-elsemary-a11930399_honored-to-receive-this-certificate-and-shield-share-7466498573958922240-xSDG'
+      },
+      {
+        id: 'proof-ai900',
+        title: 'Microsoft Certified: Azure AI Fundamentals (AI-900)',
+        issuer: 'Microsoft',
+        summary: 'Official Microsoft certification validating core machine learning competencies, Azure cognitive services, and AI ethical architecture.',
+        badge: 'Official Microsoft Cert • Mar 2026',
+        image: 'assets/microsoft-ai-900.jpg',
+        meta: 'Microsoft • Mar 2026',
+        link: 'https://www.linkedin.com/posts/yahia-elsemary-a11930399_i-earned-my-ai-900-badge-im-so-proud-share-7428504071650570240-h9o7'
+      },
+      {
+        id: 'proof-auth',
+        title: 'Authentication & Authorization in Cybersecurity',
+        issuer: 'Microsoft',
+        summary: 'Verified Microsoft security credential covering identity and access management, Zero-Trust architectural models, RBAC, and MFA protocols.',
+        badge: 'Microsoft Security • Mar 2026',
+        image: 'assets/microsoft-auth-cybersecurity.jpg',
+        meta: 'Microsoft Security • Mar 2026',
+        link: 'https://www.linkedin.com/posts/yahia-elsemary-a11930399_i-earned-my-describe-authentication-and-share-7428500109572608000-gRIh'
+      },
+      {
+        id: 'proof-mystic',
+        title: 'Mystic Arts AR (Doctor Strange) — Live Experience',
+        issuer: 'Mystic Arts AR Production',
+        summary: 'Live gesture-driven Doctor Strange AR spellcasting web application with MediaPipe Hands, Canvas 2D sacred geometry, and comprehensive architectural guides.',
+        badge: 'Interactive WebAR • 2026',
+        image: 'assets/project-mystic-arts.jpg',
+        meta: 'blackstarii.github.io/AR-programming-STRANGE',
+        link: 'https://blackstarii.github.io/AR-programming-STRANGE/'
+      },
+      {
+        id: 'proof-saqr',
+        title: 'SAQRWEAR Full-Stack Platform & Storefront',
+        issuer: 'SAQRWEAR Official Production',
+        summary: 'Live full-stack luxury platform with client storefront synchronized with mgmt-saqr management engine, SHA-256 zero-plaintext auth, anti-brute force defenses, and inventory telemetry.',
+        badge: 'Full-Stack Platform • 2026',
+        image: 'assets/saqr-logo.jpg',
+        meta: 'blackstarii.github.io/SAQRWEAR_',
+        link: 'https://blackstarii.github.io/SAQRWEAR_/'
+      }
+    ];
+
+    let activeTab = 'bio'; // 'bio' | 'media' | 'proof' | 'projects' | 'certs' | 'inbox' | 'broadcast'
+    let messages = [];
+    let currentBio = { ...DEFAULT_BIO };
+
+    function loadState() {
+      try {
+        messages = JSON.parse(localStorage.getItem('devault-secure-inbox') || '[]');
+      } catch (e) {
+        messages = [];
+      }
+      try {
+        const storedBio = localStorage.getItem('devault_custom_bio');
+        if (storedBio) currentBio = { ...DEFAULT_BIO, ...JSON.parse(storedBio) };
+      } catch (e) {
+        currentBio = { ...DEFAULT_BIO };
+      }
+    }
+
+    function renderLockout() {
+      const app = document.getElementById('app');
+      if (_lockCountdownTimer) clearInterval(_lockCountdownTimer);
+
+      function drawLockout() {
+        const remaining = getLockUntil() - Date.now();
+        if (remaining <= 0) {
+          if (_lockCountdownTimer) clearInterval(_lockCountdownTimer);
+          _lockCountdownTimer = null;
+          render();
+          return;
+        }
+        const failCount = getFailCount();
+        app.innerHTML = `
+          <div class="flex-1 flex items-center justify-center p-6 animate-fadeIn">
+            <div class="w-full max-w-md p-8 rounded-3xl bg-neutral-950/90 backdrop-blur-xl border border-rose-500/30 text-center space-y-6" style="box-shadow:0 0 40px rgba(239,68,68,0.15)">
+              
+              <div class="w-16 h-16 rounded-2xl bg-rose-900/30 border border-rose-500/40 mx-auto flex items-center justify-center">
+                <svg class="w-8 h-8 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                </svg>
+              </div>
+
+              <div class="space-y-2">
+                <span class="px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-[10px] font-mono text-rose-400 uppercase tracking-widest">
+                  INTRUSION DETECTION ACTIVE
+                </span>
+                <h1 class="text-3xl font-display font-bold text-rose-400 tracking-tight">SYSTEM LOCKED</h1>
+                <p class="text-xs font-mono text-neutral-400">Security lockout — repeated authentication failures</p>
+              </div>
+
+              <div class="p-5 rounded-2xl bg-rose-950/30 border border-rose-500/20 space-y-3">
+                <p class="text-[10px] font-mono text-rose-400 uppercase tracking-widest">Time remaining until unlock</p>
+                <div id="lockCountdown" class="text-5xl font-display font-bold text-white tabular-nums">${formatDuration(remaining)}</div>
+                <div class="w-full h-1 rounded-full bg-neutral-800 overflow-hidden">
+                  <div class="h-full bg-rose-500 rounded-full transition-all duration-1000" style="width:${Math.min(100, (remaining / getLockDuration(Math.ceil(failCount/5))) * 100).toFixed(1)}%"></div>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div class="p-3 rounded-xl bg-neutral-900 border border-white/5">
+                  <div class="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Failed Attempts</div>
+                  <div class="text-rose-400 font-bold text-lg">${failCount}</div>
+                </div>
+                <div class="p-3 rounded-xl bg-neutral-900 border border-white/5">
+                  <div class="text-neutral-500 text-[10px] uppercase tracking-widest mb-1">Lockout Tier</div>
+                  <div class="text-rose-400 font-bold text-lg">${Math.ceil(failCount/5)}</div>
+                </div>
+              </div>
+
+              <p class="text-[10px] font-mono text-neutral-600">DEVAULT // ZERO TRUST SECURITY SYSTEM</p>
+            </div>
+          </div>
+        `;
+      }
+
+      drawLockout();
+      _lockCountdownTimer = setInterval(drawLockout, 1000);
+    }
+
+    function render() {
+      const app = document.getElementById('app');
+
+      // --- Lockout Gate ---
+      if (!isAuthenticated && isLocked()) {
+        renderLockout();
+        return;
+      }
+
+      // Login Gate
+      if (!isAuthenticated) {
+        const failCount = getFailCount();
+        app.innerHTML = `
+          <div class="flex-1 flex items-center justify-center p-6 animate-fadeIn">
+            <div class="w-full max-w-md p-8 rounded-3xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 cyber-glow text-center space-y-6">
+              
+              <div class="w-16 h-16 rounded-2xl bg-neutral-900 border border-white/10 mx-auto flex items-center justify-center">
+                <svg class="w-8 h-8 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+              </div>
+
+              <div class="space-y-1">
+                <span class="px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-[10px] font-mono text-sky-400 uppercase tracking-widest">
+                  DEVAULT // ZERO TRUST AUTH
+                </span>
+                <h1 class="text-2xl font-display font-bold text-white tracking-tight">Root Management CMS</h1>
+                <p class="text-xs font-mono text-neutral-400">Total Portfolio Customization Engine</p>
+              </div>
+
+              <!-- Step indicator -->
+              <div class="flex items-center justify-center gap-2 text-[11px] font-mono text-neutral-400">
+                <span class="px-2 py-0.5 rounded ${authStep === 1 ? 'bg-sky-500/20 text-sky-400 font-bold border border-sky-500/30' : 'bg-neutral-900'}">STEP 1: PASSWORD</span>
+                <span>&rarr;</span>
+                <span class="px-2 py-0.5 rounded ${authStep === 2 ? 'bg-sky-500/20 text-sky-400 font-bold border border-sky-500/30' : 'bg-neutral-900'}">STEP 2: 2FA</span>
+              </div>
+
+              ${failCount > 0 ? `
+              <div class="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono">
+                WARNING: ${failCount} failed attempt${failCount > 1 ? 's' : ''} recorded.
+                ${5 - (failCount % 5) === 5 ? '' : (5 - (failCount % 5)) + ' attempt' + (5 - (failCount % 5) > 1 ? 's' : '') + ' until next lockout.'}
+              </div>` : ''}
+
+              <form id="loginForm" class="space-y-4">
+                ${authStep === 1 ? `
+                  <input 
+                    type="password" 
+                    id="pwdInput" 
+                    autofocus
+                    required
+                    placeholder="Enter Master Password..."
+                    class="w-full px-4 py-3.5 rounded-xl bg-neutral-900 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-sky-400 text-sm font-mono tracking-widest text-center"
+                  />
+                  <button 
+                    type="submit" 
+                    class="w-full py-3.5 rounded-xl bg-sky-400 hover:bg-white text-black font-display font-bold text-xs tracking-wider transition-all duration-300 shadow-md cursor-pointer"
+                  >
+                    CONTINUE &rarr;
+                  </button>
+                ` : `
+                  <div class="p-3.5 rounded-xl bg-neutral-900/80 border border-sky-500/30 text-sky-400 text-xs font-mono">
+                    CHALLENGE: Who is your MJ?
+                  </div>
+                  <input 
+                    type="text" 
+                    id="answerInput" 
+                    autofocus
+                    required
+                    placeholder="Enter Secret Key..."
+                    class="w-full px-4 py-3.5 rounded-xl bg-neutral-900 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-sky-400 text-sm font-mono tracking-widest text-center uppercase"
+                  />
+                  <div class="flex gap-2">
+                    <button 
+                      type="button"
+                      id="backBtn"
+                      class="flex-1 py-3.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-display font-bold text-xs tracking-wider transition-all"
+                    >
+                      Back
+                    </button>
+                    <button 
+                      type="submit" 
+                      class="flex-[2] py-3.5 rounded-xl bg-sky-400 hover:bg-white text-black font-display font-bold text-xs tracking-wider transition-all shadow-md cursor-pointer"
+                    >
+                      VERIFY &amp; ENTER
+                    </button>
+                  </div>
+                `}
+                <div id="errorBox" class="hidden p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-mono"></div>
+              </form>
+
+              <div class="pt-4 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-neutral-500">
+                <span>SECURITY: ZERO-KNOWLEDGE SHA-256</span>
+                <a href="index.html" class="text-neutral-400 hover:text-white">&larr; Return to Portfolio</a>
+              </div>
+            </div>
+          </div>
+        `;
+
+        document.getElementById('loginForm').onsubmit = async (e) => {
+          e.preventDefault();
+          const err = document.getElementById('errorBox');
+
+          if (authStep === 1) {
+            const pwd = document.getElementById('pwdInput').value;
+            const h = await sha256(pwd);
+            if (h === MASTER_HASH) {
+              authStep = 2;
+              render();
+            } else {
+              recordFailure();
+              if (isLocked()) { renderLockout(); return; }
+              err.classList.remove('hidden');
+              const fc = getFailCount();
+              const remaining5 = 5 - (fc % 5);
+              err.innerText = 'ACCESS DENIED: Master password incorrect.' +
+                (remaining5 < 5 ? ' (' + remaining5 + ' attempt' + (remaining5 > 1 ? 's' : '') + ' until lockout)' : '');
+            }
+          } else {
+            const ans = document.getElementById('answerInput').value.trim().toLowerCase();
+            const h = await sha256(ans);
+            if (h === CHALLENGE_HASH) {
+              resetFailures();
+              isAuthenticated = true;
+              sessionStorage.setItem('devault_admin_auth', 'true');
+              loadState();
+              render();
+            } else {
+              recordFailure();
+              if (isLocked()) { renderLockout(); return; }
+              err.classList.remove('hidden');
+              const fc = getFailCount();
+              const remaining5 = 5 - (fc % 5);
+              err.innerText = 'ACCESS DENIED: Challenge verification failed.' +
+                (remaining5 < 5 ? ' (' + remaining5 + ' attempt' + (remaining5 > 1 ? 's' : '') + ' until lockout)' : '');
+            }
+          }
+        };
+
+        if (document.getElementById('backBtn')) {
+          document.getElementById('backBtn').onclick = () => {
+            authStep = 1;
+            render();
+          };
+        }
+        return;
+      }
+
+      // Authenticated Dashboard
+      loadState();
+
+      app.innerHTML = `
+        <header class="px-6 py-4 bg-neutral-950/90 backdrop-blur-xl border-b border-white/10 flex items-center justify-between sticky top-0 z-40">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center font-display font-bold text-sky-400 text-xs">
+              D
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-display font-bold text-white tracking-tight">DEVAULT</span>
+                <span class="px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 text-[10px] font-mono">LIVE CONTROL CENTER</span>
+              </div>
+              <p class="text-[10px] font-mono text-neutral-400">Total Portfolio Content &amp; Media Synchronization</p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <a href="index.html" target="_blank" class="px-3 py-1.5 rounded-lg bg-neutral-900 border border-white/10 text-xs font-mono text-neutral-300 hover:text-white flex items-center gap-1.5 transition-colors">
+              <span>View Public Portfolio</span>
+              <svg class="w-3.5 h-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+            </a>
+            <button id="logoutBtn" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 text-xs font-mono transition-colors">
+              Lock Session
+            </button>
+          </div>
+        </header>
+
+        <div class="flex-1 max-w-6xl w-full mx-auto p-6 space-y-6 animate-fadeIn">
+          
+          <!-- Navigation Tabs -->
+          <div class="flex items-center justify-between border-b border-white/10 pb-4 flex-wrap gap-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="tabBio" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'bio' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Profile &amp; Hero Photo</span>
+              </button>
+
+              <button id="tabMedia" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'media' ? 'bg-violet-500/15 text-violet-400 border border-violet-500/30' : 'text-neutral-400 hover:text-white'}">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                <span>Media Gallery</span>
+              </button>
+
+              <button id="tabProof" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'proof' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Proof &amp; Credentials Media</span>
+              </button>
+
+              <button id="tabProjects" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'projects' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Projects Registry</span>
+              </button>
+
+              <button id="tabCerts" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'certs' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Cyber Lab Certs</span>
+              </button>
+
+              <button id="tabInbox" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'inbox' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Transmissions</span>
+                <span class="px-2 py-0.5 rounded-full bg-neutral-900 text-[10px] text-white font-bold">${messages.length}</span>
+              </button>
+
+              <button id="tabBroadcast" class="px-4 py-2 rounded-xl text-xs font-mono transition-all flex items-center gap-2 ${activeTab === 'broadcast' ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30' : 'text-neutral-400 hover:text-white'}">
+                <span>Live Broadcast</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- TAB 1: BIO, INFO & HERO MEDIA -->
+          ${activeTab === 'bio' ? `
+            <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+              <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                <div>
+                  <h3 class="text-base font-display font-bold text-white">Live Portfolio Information &amp; Portrait Media</h3>
+                  <p class="text-xs font-mono text-neutral-400">Upload portrait photo or update headlines in real time.</p>
+                </div>
+                <button id="resetBioBtn" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-xs font-mono text-neutral-400 hover:text-white transition-colors">
+                  Reset to Defaults
+                </button>
+              </div>
+
+              <!-- PHOTO MANAGEMENT SECTION -->
+              <div class="p-5 rounded-xl bg-neutral-900/60 border border-sky-500/20 space-y-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h4 class="text-xs font-display font-bold text-sky-400 uppercase tracking-wider">Hero Portrait Photo</h4>
+                    <p class="text-[11px] font-mono text-neutral-400">Current active portrait image shown on the portfolio.</p>
+                  </div>
+                  ${currentBio.portraitImage ? `
+                    <button id="removePhotoBtn" class="text-xs font-mono text-rose-400 hover:underline">
+                      Revert to Original Photo
+                    </button>
+                  ` : ''}
+                </div>
+
+                <div class="flex items-center gap-6">
+                  <div class="w-24 h-28 rounded-xl overflow-hidden border border-white/20 bg-black flex-shrink-0 relative group">
+                    <img 
+                      id="photoPreview" 
+                      src="${currentBio.portraitImage || 'assets/yahia-portrait.jpg'}" 
+                      alt="Portrait Preview" 
+                      class="w-full h-full object-cover"
+                      onerror="this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><rect width=\\'100\\' height=\\'100\\' fill=\\'%23111827\\'/><text x=\\'50\\' y=\\'55\\' fill=\\'%236b7280\\' font-size=\\'12\\' text-anchor=\\'middle\\'>No Photo</text></svg>'"
+                    />
+                  </div>
+
+                  <div class="space-y-3 flex-1">
+                    <div>
+                      <label class="text-[11px] font-mono text-neutral-300 block mb-1">Upload New Photo File (JPG, PNG, WebP)</label>
+                      <input type="file" id="portraitFileInput" accept="image/*" class="text-xs font-mono text-neutral-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-mono file:bg-sky-500/10 file:text-sky-400 hover:file:bg-sky-500/20 cursor-pointer" />
+                    </div>
+                    <div>
+                      <label class="text-[11px] font-mono text-neutral-300 block mb-1">Or Direct Image URL</label>
+                      <input type="url" id="portraitUrlInput" value="${currentBio.portraitImage && !currentBio.portraitImage.startsWith('data:') ? currentBio.portraitImage : ''}" placeholder="https://example.com/photo.jpg" class="w-full px-4 py-2 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs font-mono focus:border-sky-400 outline-none" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- EDITORIAL FIELDS -->
+              <form id="bioForm" class="space-y-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">Display Name</label>
+                    <input type="text" id="bioName" value="${currentBio.name}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">Status Badge / Affiliation</label>
+                    <input type="text" id="bioBadge" value="${currentBio.badge}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">Hero Primary Headline</label>
+                    <input type="text" id="bioHeadline" value="${currentBio.headline}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">Handle / Digital Tagline</label>
+                    <input type="text" id="bioTagline" value="${currentBio.tagline}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="text-xs font-mono text-neutral-400 block mb-1">Hero Subheadline</label>
+                  <input type="text" id="bioSubheadline" value="${currentBio.subheadline}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                </div>
+
+                <div>
+                  <label class="text-xs font-mono text-neutral-400 block mb-1">About Section Narrative (Biography)</label>
+                  <textarea id="bioAboutText" rows="4" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none">${currentBio.aboutText}</textarea>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">Public Email</label>
+                    <input type="email" id="bioEmail" value="${currentBio.email}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">LinkedIn URL</label>
+                    <input type="url" id="bioLinkedin" value="${currentBio.linkedinUrl}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                  <div>
+                    <label class="text-xs font-mono text-neutral-400 block mb-1">GitHub URL</label>
+                    <input type="url" id="bioGithub" value="${currentBio.githubUrl}" class="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none" />
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-4 pt-4 border-t border-white/5">
+                  <button type="submit" class="px-6 py-3 rounded-xl bg-sky-400 hover:bg-white text-black font-display font-bold text-xs tracking-wider transition-all duration-300 shadow-md cursor-pointer">
+                    SAVE &amp; PUBLISH CHANGES
+                  </button>
+                  <span id="saveStatus" class="hidden text-xs font-mono text-emerald-400">Changes published and synchronized!</span>
+                </div>
+              </form>
+            </div>
+          ` : ''}
+
+          <!-- TAB 2: MEDIA GALLERY (All site images, live-linked) -->
+          ${activeTab === 'media' ? (() => {
+            // ── Gather ALL image slots from every section ──────────────────
+            let proofItems = [];
+            try { proofItems = JSON.parse(localStorage.getItem('devault_custom_proof') || 'null') || BUILTIN_PROOF; } catch(e) { proofItems = BUILTIN_PROOF; }
+            let projectItems = [];
+            try { projectItems = JSON.parse(localStorage.getItem('devault_custom_projects') || '[]'); } catch(e) {}
+            let certItems = [];
+            try { certItems = JSON.parse(localStorage.getItem('devault_custom_certs') || '[]'); } catch(e) {}
+
+            const slots = [];
+
+            // Hero Portrait
+            slots.push({
+              key: '__portrait__',
+              section: 'Hero Portrait',
+              label: currentBio.name || 'Hero Portrait',
+              src: currentBio.portraitImage || 'assets/yahia-portrait.jpg',
+              isPortrait: true,
+            });
+
+            // Proof items
+            proofItems.forEach((p, i) => slots.push({
+              key: `proof__${i}`,
+              section: 'Proof & Credentials',
+              label: p.title,
+              src: p.image || '',
+              proofIndex: i,
+              proofId: p.id,
+            }));
+
+            // Projects
+            projectItems.forEach((p, i) => slots.push({
+              key: `project__${i}`,
+              section: 'Projects',
+              label: p.title || p.name || `Project ${i+1}`,
+              src: p.image || '',
+              projectIndex: i,
+            }));
+
+            // Certs
+            certItems.forEach((c, i) => slots.push({
+              key: `cert__${i}`,
+              section: 'Certifications',
+              label: c.name || `Cert ${i+1}`,
+              src: c.image || '',
+              certIndex: i,
+            }));
+
+            const sectionColors = {
+              'Hero Portrait':       'violet',
+              'Proof & Credentials': 'sky',
+              'Projects':            'emerald',
+              'Certifications':      'amber',
+            };
+
+            const grouped = {};
+            slots.forEach(s => {
+              if (!grouped[s.section]) grouped[s.section] = [];
+              grouped[s.section].push(s);
+            });
+
+            return `
+            <div class="space-y-8">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-base font-display font-bold text-white">Media Gallery — All Site Images</h3>
+                  <p class="text-xs font-mono text-neutral-400">Click any image to replace it. Changes sync to the live portfolio instantly.</p>
+                </div>
+                <span class="px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-[10px] font-mono">${slots.length} images</span>
+              </div>
+
+              ${Object.entries(grouped).map(([section, items]) => {
+                const color = sectionColors[section] || 'sky';
+                return `
+                <div class="space-y-3">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-mono uppercase tracking-widest text-${color}-400 font-bold">${section}</span>
+                    <span class="flex-1 h-px bg-white/5"></span>
+                    <span class="text-[10px] font-mono text-neutral-600">${items.length} image${items.length > 1 ? 's' : ''}</span>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    ${items.map(slot => {
+                      const imgSrc = slot.src && slot.src.startsWith('data:') ? slot.src
+                        : slot.src ? slot.src
+                        : '';
+                      const thumb = imgSrc || '';
+                      return `
+                      <div class="media-slot group relative rounded-2xl overflow-hidden bg-neutral-900 border border-white/10 hover:border-${color}-500/40 transition-all cursor-pointer aspect-square flex flex-col"
+                           data-slot-key="${escapeHtml(slot.key)}" title="${escapeHtml(slot.label)}">
+                        ${thumb ? `
+                          <img src="${escapeHtml(thumb)}" alt="${escapeHtml(slot.label)}"
+                            class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+                          <div class="hidden w-full h-full items-center justify-center">
+                            <svg class="w-8 h-8 text-neutral-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                          </div>
+                        ` : `
+                          <div class="w-full h-full flex items-center justify-center">
+                            <svg class="w-8 h-8 text-neutral-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                          </div>
+                        `}
+                        <!-- Hover overlay -->
+                        <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-2">
+                          <svg class="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                          <span class="text-[10px] font-mono text-white text-center leading-tight">Click to replace</span>
+                        </div>
+                        <!-- Label -->
+                        <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 to-transparent">
+                          <p class="text-[9px] font-mono text-white truncate leading-tight">${escapeHtml(slot.label)}</p>
+                        </div>
+                        <!-- Hidden file input -->
+                        <input type="file" accept="image/*" class="media-file-input absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                               data-slot-key="${escapeHtml(slot.key)}"/>
+                      </div>`;
+                    }).join('')}
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          `; })() : ''}
+
+          <!-- TAB 2b: PROOF & CERTIFICATIONS MEDIA GALLERY -->
+          ${activeTab === 'proof' ? `
+            <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+              <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                <div>
+                  <h3 class="text-base font-display font-bold text-white">Proof of Work &amp; Credentials Media Gallery</h3>
+                  <p class="text-xs font-mono text-neutral-400">View current images, descriptions, upload new photos, or edit titles.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button id="addProofBtn" class="px-4 py-2 rounded-xl bg-sky-400 text-black font-display font-bold text-xs tracking-wider hover:bg-white transition-all">
+                    + Add Proof Item
+                  </button>
+                  <button id="resetProofBtn" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-xs font-mono text-neutral-400 hover:text-white transition-colors">
+                    Reset Defaults
+                  </button>
+                </div>
+              </div>
+
+              <div id="proofItemsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+            </div>
+          ` : ''}
+
+          <!-- TAB 3: PROJECTS MANAGER -->
+          ${activeTab === 'projects' ? `
+            <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+              <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                <div>
+                  <h3 class="text-base font-display font-bold text-white">Projects Registry</h3>
+                  <p class="text-xs font-mono text-neutral-400">Add or manage projects rendered in the portfolio.</p>
+                </div>
+                <button id="addProjBtn" class="px-4 py-2 rounded-xl bg-sky-400 text-black font-display font-bold text-xs tracking-wider hover:bg-white transition-all">
+                  + Add Project
+                </button>
+              </div>
+              <div id="projectsListContainer" class="space-y-3"></div>
+            </div>
+          ` : ''}
+
+          <!-- TAB 4: CREDENTIALS MANAGER -->
+          ${activeTab === 'certs' ? `
+            <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+              <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                <div>
+                  <h3 class="text-base font-display font-bold text-white">Cyber Lab Credentials</h3>
+                  <p class="text-xs font-mono text-neutral-400">Control credentials shown in the Cybersecurity Lab.</p>
+                </div>
+                <button id="addCertBtn" class="px-4 py-2 rounded-xl bg-sky-400 text-black font-display font-bold text-xs tracking-wider hover:bg-white transition-all">
+                  + Add Credential
+                </button>
+              </div>
+              <div id="certsListContainer" class="space-y-3"></div>
+            </div>
+          ` : ''}
+
+          <!-- TAB 5: INBOX -->
+          ${activeTab === 'inbox' ? (() => {
+            const w3fKey = localStorage.getItem('devault_web3forms_key') || '';
+            return `
+            <div class="space-y-6">
+
+              <!-- Web3Forms Cross-Device Config — 1 field only -->
+              <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-sky-500/20 space-y-5">
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <svg class="w-4 h-4 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-display font-bold text-white">Cross-Device Inbox — Web3Forms</h3>
+                    <p class="text-xs font-mono text-neutral-400 mt-0.5">Every message from any device (mobile, tablet, PC) lands in yaworke@gmail.com. Only one field to fill.</p>
+                  </div>
+                </div>
+
+                ${w3fKey ? `
+                  <div class="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                    <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span class="text-xs font-mono text-emerald-400">Web3Forms ACTIVE — all device messages delivered to yaworke@gmail.com.</span>
+                  </div>
+                ` : `
+                  <div class="flex items-center gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                    <svg class="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <span class="text-xs font-mono text-amber-400">Not configured — mobile messages stay on visitor device only.</span>
+                  </div>
+                `}
+
+                <!-- How to get the key -->
+                <div class="p-4 rounded-xl bg-neutral-900/80 border border-white/5 space-y-1.5 text-[11px] font-mono">
+                  <div class="text-sky-400 font-bold">Get your free key in 30 seconds:</div>
+                  <div class="text-neutral-400">1. Open <span class="text-white font-bold">web3forms.com</span> in a new tab</div>
+                  <div class="text-neutral-400">2. Type <span class="text-sky-300">yaworke@gmail.com</span> in the box → click <span class="text-white">Get Access Key</span></div>
+                  <div class="text-neutral-400">3. Copy the key from the page → paste it below → Save</div>
+                  <div class="text-neutral-400">4. Done. No account, no password, no other steps.</div>
+                </div>
+
+                <div class="flex items-end gap-3 flex-wrap">
+                  <div class="flex-1 min-w-48 space-y-1.5">
+                    <label class="text-[10px] font-mono text-neutral-500 uppercase tracking-widest">Web3Forms Access Key</label>
+                    <input id="w3fKeyInput" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      value="${escapeHtml(w3fKey)}"
+                      class="w-full px-3 py-2.5 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs font-mono focus:border-sky-400 outline-none placeholder-neutral-600"/>
+                  </div>
+                  <button id="saveW3fBtn" class="px-5 py-2.5 rounded-xl bg-sky-400 hover:bg-white text-black font-display font-bold text-xs tracking-wider transition-all shadow-md cursor-pointer whitespace-nowrap">
+                    SAVE KEY
+                  </button>
+                  ${w3fKey ? `<button id="clearW3fBtn" class="px-4 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 text-xs font-mono transition-colors">Clear</button>` : ''}
+                  <span id="w3fStatus" class="hidden text-xs font-mono text-emerald-400">Saved — cross-device active.</span>
+                </div>
+              </div>
+
+              <!-- Inbox Messages -->
+              <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+                <div class="flex items-center justify-between border-b border-white/5 pb-4 flex-wrap gap-3">
+                  <div>
+                    <h3 class="text-base font-display font-bold text-white">Incoming Transmissions</h3>
+                    <p class="text-xs font-mono text-neutral-400">${messages.length} message${messages.length !== 1 ? 's' : ''} captured locally (same-device submissions).</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button id="exportInboxBtn" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-xs font-mono text-neutral-300">Export JSON</button>
+                    <button id="clearInboxBtn" class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs font-mono text-rose-300">Clear All</button>
+                  </div>
+                </div>
+
+                ${messages.length === 0 ? `
+                  <div class="p-12 text-center space-y-2 border border-dashed border-white/10 rounded-2xl">
+                    <p class="text-xs font-mono text-neutral-500">No transmissions in local inbox.</p>
+                    <p class="text-[10px] font-mono text-neutral-600">Configure Web3Forms above — then every device's message goes to yaworke@gmail.com.</p>
+                  </div>
+                ` : `
+                  <div class="space-y-4">
+                    ${messages.map((msg, index) => `
+                      <div class="p-5 rounded-xl bg-neutral-900 border border-white/10 space-y-3">
+                        <div class="flex items-center justify-between flex-wrap gap-2 text-xs font-mono">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-white font-bold">${escapeHtml(msg.name)}</span>
+                            <span class="text-neutral-500">&lt;${escapeHtml(msg.email)}&gt;</span>
+                            ${msg.inquiryType ? `<span class="px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-[10px] uppercase">${escapeHtml(msg.inquiryType)}</span>` : ''}
+                          </div>
+                          <span class="text-neutral-500">${escapeHtml(msg.timestamp)}</span>
+                        </div>
+                        <p class="text-xs sm:text-sm text-neutral-300 whitespace-pre-wrap leading-relaxed">${escapeHtml(msg.message)}</p>
+                        ${msg.screenRes ? `<div class="text-[10px] font-mono text-neutral-600">Device: ${escapeHtml(msg.screenRes)} | ${escapeHtml(msg.language || '')}</div>` : ''}
+                        <div class="pt-2">
+                          <a href="mailto:${escapeHtml(msg.email)}?subject=Re:%20Portfolio%20Inquiry" class="px-3 py-1.5 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-400 text-xs font-mono transition-colors inline-block">
+                            Reply via Email &rarr;
+                          </a>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                `}
+              </div>
+
+            </div>
+          `; })() : ''}
+
+          <!-- TAB 6: BROADCAST NOTICE -->
+          ${activeTab === 'broadcast' ? `
+            <div class="p-6 sm:p-8 rounded-2xl bg-neutral-950/90 backdrop-blur-xl border border-white/10 space-y-6">
+              <div>
+                <h3 class="text-base font-display font-bold text-white">Live Global Banner Notice</h3>
+                <p class="text-xs font-mono text-neutral-400">Post a real-time banner that appears at the top of the portfolio.</p>
+              </div>
+
+              <div class="space-y-4">
+                <textarea id="noticeInput" rows="3" placeholder="e.g. Currently available for engineering collaborations..." class="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-white/10 text-white text-xs sm:text-sm font-mono focus:border-sky-400 outline-none">${localStorage.getItem('devault_public_notice') || ''}</textarea>
+                
+                <div class="flex items-center gap-4">
+                  <button id="saveNoticeBtn" class="px-6 py-3 rounded-xl bg-sky-400 hover:bg-white text-black font-display font-bold text-xs tracking-wider transition-all shadow-md cursor-pointer">
+                    BROADCAST NOTICE
+                  </button>
+                  <button id="clearNoticeBtn" class="px-4 py-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 text-xs font-mono transition-colors">
+                    Clear Notice
+                  </button>
+                  <span id="noticeStatus" class="hidden text-xs font-mono text-emerald-400">Notice deployed!</span>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+        </div>
+      `;
+
+      // Event Listeners for Authenticated State
+      document.getElementById('logoutBtn').onclick = () => {
+        sessionStorage.removeItem('devault_admin_auth');
+        isAuthenticated = false;
+        render();
+      };
+
+      document.getElementById('tabBio').onclick = () => { activeTab = 'bio'; render(); };
+      document.getElementById('tabMedia').onclick = () => { activeTab = 'media'; render(); };
+      document.getElementById('tabProof').onclick = () => { activeTab = 'proof'; render(); renderProofGallery(); };
+      document.getElementById('tabProjects').onclick = () => { activeTab = 'projects'; render(); renderProjectsList(); };
+      document.getElementById('tabCerts').onclick = () => { activeTab = 'certs'; render(); renderCertsList(); };
+      document.getElementById('tabInbox').onclick = () => { activeTab = 'inbox'; render(); };
+      document.getElementById('tabBroadcast').onclick = () => { activeTab = 'broadcast'; render(); };
+
+      // ── MEDIA GALLERY: file input handlers ───────────────────────────────
+      if (activeTab === 'media') {
+        document.querySelectorAll('.media-file-input').forEach(input => {
+          input.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const slotKey = e.target.dataset.slotKey;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              const dataUrl = evt.target.result;
+              applyMediaChange(slotKey, dataUrl);
+            };
+            reader.readAsDataURL(file);
+          });
+        });
+      }
+
+      function applyMediaChange(slotKey, dataUrl) {
+        if (slotKey === '__portrait__') {
+          // Update hero portrait
+          currentBio.portraitImage = dataUrl;
+          const bio = { ...DEFAULT_BIO, ...currentBio };
+          localStorage.setItem('devault_custom_bio', JSON.stringify(bio));
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', bio });
+
+        } else if (slotKey.startsWith('proof__')) {
+          const idx = parseInt(slotKey.split('__')[1]);
+          let proofItems;
+          try { proofItems = JSON.parse(localStorage.getItem('devault_custom_proof') || 'null') || [...BUILTIN_PROOF]; }
+          catch(e) { proofItems = [...BUILTIN_PROOF]; }
+          if (proofItems[idx]) {
+            proofItems[idx] = { ...proofItems[idx], image: dataUrl };
+            localStorage.setItem('devault_custom_proof', JSON.stringify(proofItems));
+            if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', proof: proofItems });
+          }
+
+        } else if (slotKey.startsWith('project__')) {
+          const idx = parseInt(slotKey.split('__')[1]);
+          let items;
+          try { items = JSON.parse(localStorage.getItem('devault_custom_projects') || '[]'); }
+          catch(e) { items = []; }
+          if (items[idx]) {
+            items[idx] = { ...items[idx], image: dataUrl };
+            localStorage.setItem('devault_custom_projects', JSON.stringify(items));
+            if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', projects: items });
+          }
+
+        } else if (slotKey.startsWith('cert__')) {
+          const idx = parseInt(slotKey.split('__')[1]);
+          let items;
+          try { items = JSON.parse(localStorage.getItem('devault_custom_certs') || '[]'); }
+          catch(e) { items = []; }
+          if (items[idx]) {
+            items[idx] = { ...items[idx], image: dataUrl };
+            localStorage.setItem('devault_custom_certs', JSON.stringify(items));
+            if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', certs: items });
+          }
+        }
+
+        // Re-render the gallery to show updated image immediately
+        setTimeout(() => { activeTab = 'media'; render(); }, 150);
+      }
+
+      if (activeTab === 'bio') {
+        const fileInput = document.getElementById('portraitFileInput');
+        const urlInput = document.getElementById('portraitUrlInput');
+        const preview = document.getElementById('photoPreview');
+
+        fileInput.onchange = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const dataUrl = evt.target.result;
+            currentBio.portraitImage = dataUrl;
+            preview.src = dataUrl;
+            urlInput.value = '';
+          };
+          reader.readAsDataURL(file);
+        };
+
+        urlInput.oninput = (e) => {
+          const val = e.target.value.trim();
+          if (val) {
+            currentBio.portraitImage = val;
+            preview.src = val;
+            fileInput.value = '';
+          }
+        };
+
+        const removePhotoBtn = document.getElementById('removePhotoBtn');
+        if (removePhotoBtn) {
+          removePhotoBtn.onclick = () => {
+            currentBio.portraitImage = '';
+            preview.src = 'assets/yahia-portrait.jpg';
+            urlInput.value = '';
+            fileInput.value = '';
+          };
+        }
+
+        document.getElementById('bioForm').onsubmit = (e) => {
+          e.preventDefault();
+          currentBio.name = document.getElementById('bioName').value;
+          currentBio.badge = document.getElementById('bioBadge').value;
+          currentBio.headline = document.getElementById('bioHeadline').value;
+          currentBio.subheadline = document.getElementById('bioSubheadline').value;
+          currentBio.tagline = document.getElementById('bioTagline').value;
+          currentBio.aboutText = document.getElementById('bioAboutText').value;
+          currentBio.email = document.getElementById('bioEmail').value;
+          currentBio.linkedinUrl = document.getElementById('bioLinkedin').value;
+          currentBio.githubUrl = document.getElementById('bioGithub').value;
+
+          localStorage.setItem('devault_custom_bio', JSON.stringify(currentBio));
+          if (syncChannel) {
+            syncChannel.postMessage({ type: 'SYNC_ALL', bio: currentBio });
+          }
+
+          const st = document.getElementById('saveStatus');
+          st.classList.remove('hidden');
+          setTimeout(() => st.classList.add('hidden'), 3000);
+        };
+
+        document.getElementById('resetBioBtn').onclick = () => {
+          if (!confirm('Revert all bio fields and portrait photo to defaults?')) return;
+          localStorage.removeItem('devault_custom_bio');
+          currentBio = { ...DEFAULT_BIO };
+          render();
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', bio: DEFAULT_BIO });
+        };
+      }
+
+      if (activeTab === 'proof') {
+        renderProofGallery();
+        document.getElementById('addProofBtn').onclick = () => {
+          const title = prompt('Enter Item Title:');
+          if (!title) return;
+          const issuer = prompt('Issuing Organization / Program:', 'Official Authority') || '';
+          const summary = prompt('Description / Summary text:') || '';
+          const badge = prompt('Tag / Badge (e.g. Verified • 2026):', 'Verified • 2026') || '';
+          const link = prompt('Link URL (optional):', '') || '';
+
+          const list = getProofList();
+          list.unshift({
+            id: 'proof-' + Date.now(),
+            title,
+            issuer,
+            summary,
+            badge,
+            image: '',
+            meta: issuer,
+            link
+          });
+          saveProofList(list);
+          renderProofGallery();
+        };
+
+        document.getElementById('resetProofBtn').onclick = () => {
+          if (!confirm('Revert all credentials and proof items to default?')) return;
+          localStorage.removeItem('devault_custom_proof');
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', proof: BUILTIN_PROOF });
+          renderProofGallery();
+        };
+      }
+
+      if (activeTab === 'projects') {
+        renderProjectsList();
+        document.getElementById('addProjBtn').onclick = () => {
+          const title = prompt('Project Title:');
+          if (!title) return;
+          const tagline = prompt('Tagline / Short Summary:') || '';
+          const category = prompt('Category (web / cyber / ai / design):', 'web') || 'web';
+          const list = getProjectsList();
+          list.unshift({
+            id: 'proj-' + Date.now(),
+            title,
+            tagline,
+            category,
+            categoryLabel: category.toUpperCase(),
+            summary: tagline,
+            coverImage: '',
+            technologies: ['TypeScript', 'React'],
+            status: 'Completed',
+            featured: true
+          });
+          localStorage.setItem('devault_custom_projects', JSON.stringify(list));
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', projects: list });
+          renderProjectsList();
+        };
+      }
+
+      if (activeTab === 'certs') {
+        renderCertsList();
+        document.getElementById('addCertBtn').onclick = () => {
+          const title = prompt('Credential Title:');
+          if (!title) return;
+          const issuer = prompt('Issuing Body (e.g. Cisco, Microsoft):', 'Cisco Networking Academy') || '';
+          const date = prompt('Date Issued (e.g. November 2026):', '2026') || '';
+          const list = getCertsList();
+          list.unshift({
+            id: 'cert-' + Date.now(),
+            title,
+            issuer,
+            date,
+            type: 'Certification',
+            description: 'Verified professional qualification in cybersecurity & computing.',
+            skills: ['Cybersecurity', 'Systems Architecture']
+          });
+          localStorage.setItem('devault_custom_certs', JSON.stringify(list));
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', certs: list });
+          renderCertsList();
+        };
+      }
+
+      if (activeTab === 'inbox') {
+        // Web3Forms config save
+        const saveW3fBtn = document.getElementById('saveW3fBtn');
+        if (saveW3fBtn) {
+          saveW3fBtn.onclick = () => {
+            const key = (document.getElementById('w3fKeyInput').value || '').trim();
+            if (key) localStorage.setItem('devault_web3forms_key', key);
+            else localStorage.removeItem('devault_web3forms_key');
+            const st = document.getElementById('w3fStatus');
+            if (st) { st.classList.remove('hidden'); setTimeout(() => { st.classList.add('hidden'); render(); }, 1800); }
+          };
+        }
+        const clearW3fBtn = document.getElementById('clearW3fBtn');
+        if (clearW3fBtn) {
+          clearW3fBtn.onclick = () => { localStorage.removeItem('devault_web3forms_key'); render(); };
+        }
+
+        const exportBtn = document.getElementById('exportInboxBtn');
+        if (exportBtn) {
+          exportBtn.onclick = () => {
+            const blob = new Blob([JSON.stringify(messages, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `devault-transmissions-${Date.now()}.json`;
+            a.click();
+          };
+        }
+        const clearBtn = document.getElementById('clearInboxBtn');
+        if (clearBtn) {
+          clearBtn.onclick = () => {
+            if (!confirm('Purge all stored contact messages?')) return;
+            localStorage.removeItem('devault-secure-inbox');
+            messages = [];
+            render();
+          };
+        }
+      }
+
+      if (activeTab === 'broadcast') {
+        document.getElementById('saveNoticeBtn').onclick = () => {
+          const val = document.getElementById('noticeInput').value.trim();
+          localStorage.setItem('devault_public_notice', val);
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', notice: val });
+          const st = document.getElementById('noticeStatus');
+          st.classList.remove('hidden');
+          setTimeout(() => st.classList.add('hidden'), 2500);
+        };
+        document.getElementById('clearNoticeBtn').onclick = () => {
+          localStorage.removeItem('devault_public_notice');
+          document.getElementById('noticeInput').value = '';
+          if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', notice: '' });
+          const st = document.getElementById('noticeStatus');
+          st.classList.remove('hidden');
+          setTimeout(() => st.classList.add('hidden'), 2500);
+        };
+      }
+    }
+
+    // ========================================================
+    // PROOF & CREDENTIALS GALLERY ENGINE
+    // ========================================================
+    function getProofList() {
+      try {
+        return JSON.parse(localStorage.getItem('devault_custom_proof')) || BUILTIN_PROOF;
+      } catch {
+        return BUILTIN_PROOF;
+      }
+    }
+
+    function saveProofList(list) {
+      localStorage.setItem('devault_custom_proof', JSON.stringify(list));
+      if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', proof: list });
+    }
+
+    function renderProofGallery() {
+      const container = document.getElementById('proofItemsContainer');
+      if (!container) return;
+      const list = getProofList();
+
+      container.innerHTML = list.map((item, idx) => `
+        <div class="p-5 rounded-2xl bg-neutral-900 border border-white/10 space-y-4">
+          <div class="flex items-start gap-4">
+            <!-- Thumbnail preview -->
+            <div class="w-28 h-24 rounded-xl overflow-hidden bg-black border border-white/20 flex-shrink-0 relative group">
+              <img 
+                id="proofImg-${idx}" 
+                src="${item.image || 'assets/yahia-portrait.jpg'}" 
+                alt="Proof Preview" 
+                class="w-full h-full object-cover"
+                onerror="this.src='data:image/svg+xml,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><rect width=\\'100\\' height=\\'100\\' fill=\\'%23111827\\'/><text x=\\'50\\' y=\\'55\\' fill=\\'%236b7280\\' font-size=\\'11\\' text-anchor=\\'middle\\'>No Image</text></svg>'"
+              />
+            </div>
+
+            <!-- Header and Badge -->
+            <div class="flex-1 space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 text-[10px] font-mono">${escapeHtml(item.badge || 'VERIFIED')}</span>
+                <button class="text-rose-400 hover:text-rose-300 text-xs font-mono" onclick="deleteProofItem(${idx})">Delete</button>
+              </div>
+              <h4 class="text-sm font-bold text-white leading-snug">${escapeHtml(item.title)}</h4>
+              <p class="text-[11px] font-mono text-neutral-400">${escapeHtml(item.issuer || '')}</p>
+            </div>
+          </div>
+
+          <!-- Description text displayed at the image -->
+          <div class="p-3 rounded-lg bg-neutral-950/80 border border-white/5 text-xs text-neutral-300 leading-relaxed font-mono">
+            <span class="text-neutral-500 block text-[10px] uppercase mb-1">Text Description:</span>
+            ${escapeHtml(item.summary || '')}
+          </div>
+
+          <!-- Controls: Upload new photo or edit text -->
+          <div class="pt-2 border-t border-white/5 flex items-center justify-between gap-3 flex-wrap">
+            <label class="text-[11px] font-mono text-sky-400 hover:text-white cursor-pointer bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/20">
+              Replace Image File
+              <input type="file" accept="image/*" class="hidden" onchange="uploadProofPhoto(event, ${idx})" />
+            </label>
+            <button class="text-[11px] font-mono text-neutral-300 hover:text-white bg-neutral-800 px-3 py-1.5 rounded-lg" onclick="editProofText(${idx})">
+              Edit Description &amp; Title
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.uploadProofPhoto = (e, idx) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const list = getProofList();
+        list[idx].image = evt.target.result;
+        saveProofList(list);
+        renderProofGallery();
+      };
+      reader.readAsDataURL(file);
+    };
+
+    window.editProofText = (idx) => {
+      const list = getProofList();
+      const current = list[idx];
+      const newTitle = prompt('Edit Title:', current.title);
+      if (newTitle === null) return;
+      const newSummary = prompt('Edit Description Text:', current.summary);
+      if (newSummary === null) return;
+      const newBadge = prompt('Edit Tag / Badge:', current.badge || '');
+
+      current.title = newTitle || current.title;
+      current.summary = newSummary || current.summary;
+      if (newBadge !== null) current.badge = newBadge;
+
+      saveProofList(list);
+      renderProofGallery();
+    };
+
+    window.deleteProofItem = (idx) => {
+      const list = getProofList();
+      if (!confirm(`Delete "${list[idx].title}"?`)) return;
+      list.splice(idx, 1);
+      saveProofList(list);
+      renderProofGallery();
+    };
+
+    // ========================================================
+    // PROJECTS REGISTRY ENGINE
+    // ========================================================
+    function getProjectsList() {
+      try {
+        return JSON.parse(localStorage.getItem('devault_custom_projects')) || [
+          { id:'saqrwear', title:'SAQRWEAR — Full-Stack Luxury Platform', category:'web', tagline:'Full-stack e-commerce ecosystem with two-way frontend-backend synchronization.' },
+          { id:'mystic-arts', title:'Mystic Arts AR — Doctor Strange Spellcasting', category:'ai', tagline:'Real-time gesture-driven spellcasting using vanilla JS and MediaPipe tracking.' },
+          { id:'paperx', title:'PAPERX — Financial Paper Trading Platform', category:'web', tagline:'Algorithmic price charting, order book depth, and portfolio P&L simulation.' },
+          { id:'mark65', title:'MARK 65 / JARVIS — Cyber Desktop Agent', category:'ai', tagline:'Autonomous assistant with WebSocket audio streaming and hardware monitoring.' },
+          { id:'orbit', title:'Orbit Academy — EdTech Platform', category:'web', tagline:'Modern course management with student progress analytics.' },
+          { id:'honeypot', title:'AI Adaptive Honeypot — Deception Architecture', category:'cyber', tagline:'High-interaction honeypot system for proactive threat intelligence.' }
+        ];
+      } catch {
+        return [];
+      }
+    }
+
+    function renderProjectsList() {
+      const container = document.getElementById('projectsListContainer');
+      if (!container) return;
+      const list = getProjectsList();
+      container.innerHTML = list.map((p, idx) => `
+        <div class="p-4 rounded-xl bg-neutral-900 border border-white/10 flex items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 text-[10px] font-mono uppercase">${escapeHtml(p.category || 'web')}</span>
+              <span class="text-sm font-bold text-white">${escapeHtml(p.title)}</span>
+            </div>
+            <p class="text-xs font-mono text-neutral-400 mt-1">${escapeHtml(p.tagline || '')}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-mono" onclick="editProject(${idx})">
+              Edit
+            </button>
+            <button class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-mono" onclick="deleteProject(${idx})">
+              Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.editProject = (idx) => {
+      const list = getProjectsList();
+      const p = list[idx];
+      const newTitle = prompt('Project Title:', p.title);
+      if (newTitle === null) return;
+      const newTagline = prompt('Tagline / Summary:', p.tagline || '');
+      p.title = newTitle || p.title;
+      if (newTagline !== null) p.tagline = newTagline;
+      localStorage.setItem('devault_custom_projects', JSON.stringify(list));
+      if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', projects: list });
+      renderProjectsList();
+    };
+
+    window.deleteProject = (idx) => {
+      const list = getProjectsList();
+      if (!confirm(`Delete project "${list[idx].title}"?`)) return;
+      list.splice(idx, 1);
+      localStorage.setItem('devault_custom_projects', JSON.stringify(list));
+      if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', projects: list });
+      renderProjectsList();
+    };
+
+    // ========================================================
+    // CERTS REGISTRY ENGINE
+    // ========================================================
+    function getCertsList() {
+      try {
+        return JSON.parse(localStorage.getItem('devault_custom_certs')) || [
+          { id:'cisco-ethical-hacker', title:'Cisco Ethical Hacker', issuer:'Cisco Networking Academy', date:'October 2026' },
+          { id:'military-academy', title:'National Security & Strategic Studies', issuer:'Military Academy', date:'June 2026' },
+          { id:'microsoft-ai-900', title:'Microsoft Certified: Azure AI (AI-900)', issuer:'Microsoft', date:'March 2026' },
+          { id:'microsoft-auth', title:'Authentication & Authorization in Cybersecurity', issuer:'Microsoft', date:'February 2026' }
+        ];
+      } catch {
+        return [];
+      }
+    }
+
+    function renderCertsList() {
+      const container = document.getElementById('certsListContainer');
+      if (!container) return;
+      const list = getCertsList();
+      container.innerHTML = list.map((c, idx) => `
+        <div class="p-4 rounded-xl bg-neutral-900 border border-white/10 flex items-center justify-between gap-4">
+          <div>
+            <span class="text-sm font-bold text-white">${escapeHtml(c.title)}</span>
+            <p class="text-xs font-mono text-neutral-400 mt-1">${escapeHtml(c.issuer)} • ${escapeHtml(c.date || '')}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-mono" onclick="editCert(${idx})">
+              Edit
+            </button>
+            <button class="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-mono" onclick="deleteCert(${idx})">
+              Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.editCert = (idx) => {
+      const list = getCertsList();
+      const c = list[idx];
+      const newTitle = prompt('Credential Title:', c.title);
+      if (newTitle === null) return;
+      const newIssuer = prompt('Issuing Organization:', c.issuer || '');
+      c.title = newTitle || c.title;
+      if (newIssuer !== null) c.issuer = newIssuer;
+      localStorage.setItem('devault_custom_certs', JSON.stringify(list));
+      if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', certs: list });
+      renderCertsList();
+    };
+
+    window.deleteCert = (idx) => {
+      const list = getCertsList();
+      if (!confirm(`Delete credential "${list[idx].title}"?`)) return;
+      list.splice(idx, 1);
+      localStorage.setItem('devault_custom_certs', JSON.stringify(list));
+      if (syncChannel) syncChannel.postMessage({ type: 'SYNC_ALL', certs: list });
+      renderCertsList();
+    };
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    // ========================================================
+    // 3D THREE.JS AMBIENT BACKGROUND ANIMATION
+    // ========================================================
+    (function init3DAmbient() {
+      const container = document.getElementById('three-canvas-bg');
+      if (!container || typeof THREE === 'undefined') return;
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.z = 6;
+
+      let renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+      } catch (e) {
+        return;
+      }
+
+      // Torus Knot ambient wireframe geometry
+      const geom = new THREE.TorusKnotGeometry(1.5, 0.45, 90, 16);
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.18
+      });
+      const torusMesh = new THREE.Mesh(geom, wireMat);
+      scene.add(torusMesh);
+
+      // Cyber Particles Dust
+      const partGeo = new THREE.BufferGeometry();
+      const count = 100;
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count * 3; i += 3) {
+        pos[i] = (Math.random() - 0.5) * 14;
+        pos[i+1] = (Math.random() - 0.5) * 14;
+        pos[i+2] = (Math.random() - 0.5) * 8;
+      }
+      partGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const partMat = new THREE.PointsMaterial({ color: 0x38bdf8, size: 0.04, transparent: true, opacity: 0.4 });
+      const particles = new THREE.Points(partGeo, partMat);
+      scene.add(particles);
+
+      let mouseX = 0, mouseY = 0;
+      window.addEventListener('mousemove', e => {
+        mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+        mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+      }, { passive: true });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      let clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+        torusMesh.rotation.x = t * 0.15 + mouseY * 0.15;
+        torusMesh.rotation.y = t * 0.25 + mouseX * 0.15;
+        particles.rotation.y = t * 0.04;
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+
+    // Initial render
+    loadState();
+    render();
+  </script>
+</body>
+</html>
