@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DEVAULT // CONTROL CENTER — Admin Console</title>
+<meta name="robots" content="noindex,nofollow"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#05070e;
+  --surface:#0b0f19;
+  --surface-alt:#111625;
+  --border:#1b2234;
+  --border-focus:#38bdf8;
+  --cyan:#38bdf8;
+  --cyan-glow:rgba(56,189,248,0.25);
+  --cyan-dim:rgba(56,189,248,0.08);
+  --green:#10b981;
+  --green-dim:rgba(16,185,129,0.12);
+  --red:#ef4444;
+  --red-dim:rgba(239,68,68,0.12);
+  --text:#f1f5f9;
+  --text-dim:#94a3b8;
+  --text-muted:#64748b;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-display:'Space Grotesk',sans-serif;
+  --font-tech:'Chakra Petch',sans-serif;
+}
+html,body{
+  min-height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font-mono);
+  font-size:13px;
+  line-height:1.5;
+  overflow-x:hidden;
+}
+
+/* Background Cyber Grid & Vignette */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  background-image:
+    linear-gradient(to right,rgba(255,255,255,0.02) 1px,transparent 1px),
+    linear-gradient(to bottom,rgba(255,255,255,0.02) 1px,transparent 1px);
+  background-size:32px 32px;
+  pointer-events:none;
+  z-index:0;
+}
+body::after{
+  content:'';
+  position:fixed;
+  inset:0;
+  background:radial-gradient(circle at 50% 0%, rgba(56,189,248,0.08) 0%, transparent 70%);
+  pointer-events:none;
+  z-index:0;
+}
+
+/* Inputs & Form Elements */
+input,textarea,select{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:4px;
+  color:var(--text);
+  font-family:var(--font-mono);
+  font-size:12px;
+  padding:10px 14px;
+  width:100%;
+  outline:none;
+  transition:all .2s ease;
+}
+input:focus,textarea:focus,select:focus{
+  border-color:var(--cyan);
+  box-shadow:0 0 12px var(--cyan-glow);
+  background:#0e1320;
+}
+textarea{resize:vertical;min-height:75px}
+
+/* Buttons */
+button{
+  cursor:pointer;
+  font-family:var(--font-tech);
+  font-weight:600;
+  letter-spacing:1px;
+  font-size:12px;
+  text-transform:uppercase;
+  border-radius:4px;
+  padding:9px 18px;
+  transition:all .2s ease;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:none;
+}
+.btn-cyan{
+  background:var(--cyan);
+  color:#040711;
+  box-shadow:0 0 15px rgba(56,189,248,0.3);
+}
+.btn-cyan:hover{
+  background:#7dd3fc;
+  box-shadow:0 0 22px rgba(56,189,248,0.5);
+  transform:translateY(-1px);
+}
+.btn-ghost{
+  background:transparent;
+  border:1px solid var(--border);
+  color:var(--text-dim);
+}
+.btn-ghost:hover{
+  border-color:var(--cyan);
+  color:var(--cyan);
+  background:var(--cyan-dim);
+}
+.btn-danger{
+  background:transparent;
+  border:1px solid var(--red);
+  color:var(--red);
+}
+.btn-danger:hover{
+  background:var(--red-dim);
+}
+
+/* =====================================================================
+   LOGIN HUD
+   ===================================================================== */
+#login-screen{
+  position:relative;
+  z-index:10;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100vh;
+  padding:20px;
+}
+.login-frame{
+  width:100%;
+  max-width:440px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:36px;
+  position:relative;
+  box-shadow:0 20px 50px rgba(0,0,0,0.8), 0 0 40px rgba(56,189,248,0.05);
+  animation:hudFadeIn .5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.login-frame::before{
+  content:'';
+  position:absolute;
+  top:-1px;left:20px;right:20px;height:2px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+}
+.brand-header{
+  text-align:center;
+  margin-bottom:28px;
+}
+.brand-title{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:22px;
+  letter-spacing:3px;
+  color:var(--text);
+}
+.brand-title span{
+  color:var(--cyan);
+  text-shadow:0 0 10px var(--cyan);
+}
+.brand-subtitle{
+  font-size:11px;
+  letter-spacing:2px;
+  color:var(--text-muted);
+  text-transform:uppercase;
+  margin-top:4px;
+}
+
+.step-tracker{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  padding-bottom:12px;
+  margin-bottom:24px;
+  font-size:11px;
+  letter-spacing:1px;
+  color:var(--text-muted);
+}
+.step-item{display:flex;align-items:center;gap:6px}
+.step-item.active{color:var(--cyan)}
+.step-num{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:18px;height:18px;
+  border-radius:2px;
+  border:1px solid var(--border);
+  font-size:10px;
+}
+.step-item.active .step-num{
+  border-color:var(--cyan);
+  background:var(--cyan-dim);
+  color:var(--cyan);
+}
+
+.field-group{margin-bottom:18px}
+.field-label{
+  display:block;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:1.5px;
+  color:var(--text-dim);
+  margin-bottom:8px;
+}
+#login-msg{
+  min-height:20px;
+  font-size:11px;
+  text-align:center;
+  margin-top:14px;
+  color:var(--red);
+}
+
+/* =====================================================================
+   ADMIN CORE SHELL
+   ===================================================================== */
+#admin-shell{
+  display:none;
+  position:relative;
+  z-index:10;
+  min-height:100vh;
+  flex-direction:column;
+}
+
+/* Top Navbar */
+.top-nav{
+  position:sticky;
+  top:0;
+  z-index:50;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 28px;
+  background:rgba(11,15,25,0.85);
+  backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--border);
+}
+.nav-brand{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.nav-logo{
+  width:28px;height:28px;
+  border:1px solid var(--cyan);
+  background:rgba(56,189,248,0.1);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--cyan);
+  font-family:var(--font-tech);
+  font-weight:700;
+  font-size:14px;
+}
+.nav-title{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:15px;
+  letter-spacing:2px;
+}
+.nav-status{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:10px;
+  letter-spacing:1.5px;
+  color:var(--green);
+  text-transform:uppercase;
+}
+.pulse-dot{
+  width:6px;height:6px;
+  border-radius:50%;
+  background:var(--green);
+  box-shadow:0 0 8px var(--green);
+  animation:pulse 2s infinite;
+}
+
+/* Main Layout Grid */
+.workspace{
+  display:flex;
+  flex:1;
+  max-width:1440px;
+  margin:0 auto;
+  width:100%;
+}
+
+/* Sidebar Navigation Tabs */
+.sidebar{
+  width:240px;
+  border-right:1px solid var(--border);
+  background:var(--surface);
+  padding:20px 0;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.tab-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 24px;
+  color:var(--text-dim);
+  font-size:12px;
+  letter-spacing:1px;
+  background:transparent;
+  border:none;
+  border-left:2px solid transparent;
+  border-radius:0;
+  width:100%;
+  text-align:left;
+  text-transform:uppercase;
+}
+.tab-item:hover{
+  background:var(--cyan-dim);
+  color:var(--text);
+  border-left-color:rgba(56,189,248,0.4);
+}
+.tab-item.active{
+  background:rgba(56,189,248,0.1);
+  color:var(--cyan);
+  border-left-color:var(--cyan);
+  font-weight:700;
+}
+.tab-count{
+  background:#1b2234;
+  color:var(--text-dim);
+  font-size:10px;
+  padding:2px 6px;
+  border-radius:3px;
+}
+.tab-item.active .tab-count{
+  background:var(--cyan);
+  color:#000;
+}
+
+/* Main Content Area */
+.main-view{
+  flex:1;
+  padding:32px 36px;
+  overflow-y:auto;
+}
+.view-panel{display:none;animation:hudFadeIn .3s ease}
+.view-panel.active{display:block}
+
+/* Section Header */
+.panel-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:28px;
+  padding-bottom:14px;
+  border-bottom:1px solid var(--border);
+}
+.panel-title{
+  font-family:var(--font-display);
+  font-size:18px;
+  font-weight:700;
+  letter-spacing:2px;
+  color:var(--text);
+  text-transform:uppercase;
+}
+.panel-sub{
+  font-size:11px;
+  color:var(--text-muted);
+  letter-spacing:1px;
+  margin-top:2px;
+}
+
+/* Cyber Cards & Grid */
+.hud-card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:22px;
+  margin-bottom:20px;
+  position:relative;
+  transition:border-color .2s;
+}
+.hud-card:hover{
+  border-color:rgba(56,189,248,0.3);
+}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+
+.card-title{
+  font-family:var(--font-tech);
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:1.5px;
+  color:var(--cyan);
+  margin-bottom:18px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* Save Bar */
+.action-bar{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+}
+.sync-badge{
+  font-size:11px;
+  color:var(--green);
+  opacity:0;
+  transition:opacity .3s;
+  letter-spacing:1px;
+}
+
+/* Messages Feed */
+.message-card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-left:3px solid var(--cyan);
+  border-radius:4px;
+  padding:16px 20px;
+  margin-bottom:14px;
+  transition:all .2s;
+}
+.message-card:hover{
+  border-color:var(--cyan);
+  transform:translateX(2px);
+}
+.msg-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:8px;
+  font-size:11px;
+}
+.msg-from{
+  font-weight:700;
+  color:var(--cyan);
+  font-size:13px;
+}
+.msg-email{color:var(--text-muted);margin-left:8px}
+.msg-content{
+  color:var(--text);
+  font-size:12px;
+  line-height:1.6;
+  white-space:pre-wrap;
+  margin:10px 0;
+}
+
+/* Projects Manager Table/Cards */
+.project-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 18px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  border-radius:4px;
+  margin-bottom:10px;
+  gap:16px;
+}
+.project-row:hover{
+  border-color:var(--cyan);
+}
+.proj-title{
+  font-weight:700;
+  color:var(--text);
+  font-size:13px;
+}
+.proj-tagline{
+  font-size:11px;
+  color:var(--text-muted);
+}
+.tag-pill{
+  font-size:10px;
+  padding:3px 8px;
+  background:#111625;
+  border:1px solid var(--border);
+  border-radius:3px;
+  color:var(--cyan);
+  letter-spacing:.5px;
+}
+
+/* Animations */
+@keyframes hudFadeIn{
+  from{opacity:0;transform:translateY(10px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes pulse{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.4;transform:scale(.85)}
+}
+.empty-banner{
+  text-align:center;
+  padding:48px 20px;
+  color:var(--text-muted);
+  font-size:12px;
+  letter-spacing:1px;
+  border:1px dashed var(--border);
+  border-radius:4px;
+}
+</style>
+</head>
+<body>
+
+<!-- =====================================================================
+     LOGIN HUD (2-STEP AUTH)
+     ===================================================================== -->
+<div id="login-screen">
+  <div class="login-frame">
+    <div class="brand-header">
+      <div class="brand-title">DEVAULT <span>//</span> CORE</div>
+      <div class="brand-subtitle">Zero-Trust Management Console</div>
+    </div>
+
+    <div class="step-tracker">
+      <div class="step-item active" id="track-1">
+        <span class="step-num">01</span>
+        <span>MASTER KEY</span>
+      </div>
+      <div style="flex:1;height:1px;background:var(--border);margin:0 12px"></div>
+      <div class="step-item" id="track-2">
+        <span class="step-num">02</span>
+        <span>2FA CHALLENGE</span>
+      </div>
+    </div>
+
+    <!-- STAGE 1: PASSWORD -->
+    <div id="stage-pass">
+      <div class="field-group">
+        <label class="field-label" for="pwd-input">Admin Master Password</label>
+        <input type="password" id="pwd-input" placeholder="••••••••••••" autocomplete="current-password"/>
+      </div>
+      <button class="btn-cyan" style="width:100%" onclick="authStep1()">AUTHENTICATE &rarr;</button>
+    </div>
+
+    <!-- STAGE 2: 2FA CHALLENGE -->
+    <div id="stage-2fa" style="display:none">
+      <div class="field-group">
+        <label class="field-label">Challenge Verification</label>
+        <div style="font-family:var(--font-tech);font-size:13px;color:var(--cyan);background:#080c16;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--cyan);border-radius:3px;margin-bottom:14px;letter-spacing:.5px">
+          Who is your MJ?
+        </div>
+        <input type="text" id="answer-input" maxlength="20" placeholder="Type key answer..." style="text-align:center;letter-spacing:3px;font-size:14px;font-weight:700"/>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-ghost" style="flex:1" onclick="backToStep1()">&larr; Back</button>
+        <button class="btn-cyan" style="flex:2" onclick="authStep2()">ACCESS CONSOLE</button>
+      </div>
+    </div>
+
+    <div id="login-msg"></div>
+
+    <div style="text-align:center;margin-top:24px">
+      <a href="./index.html" style="font-size:11px;color:var(--text-muted);letter-spacing:1px;text-decoration:none">
+        &larr; Return to Public Portfolio
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- =====================================================================
+     ADMIN MAIN WORKSPACE
+     ===================================================================== -->
+<div id="admin-shell">
+  <!-- Top Navigation -->
+  <header class="top-nav">
+    <div class="nav-brand">
+      <div class="nav-logo">D</div>
+      <div>
+        <div class="nav-title">DEVAULT CORE</div>
+        <div class="nav-status"><span class="pulse-dot"></span> LIVE SYNC ACTIVE</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <a href="./index.html" target="_blank" class="btn-ghost" style="font-size:11px;padding:6px 12px">
+        OPEN PORTFOLIO &nearr;
+      </a>
+      <button class="btn-danger" style="font-size:11px;padding:6px 14px" onclick="logoutSession()">
+        TERMINATE SESSION
+      </button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <button class="tab-item active" onclick="navigate('tab-bio', this)">
+        <span>Profile &amp; Bio</span>
+      </button>
+      <button class="tab-item" onclick="navigate('tab-projects', this)">
+        <span>Projects Control</span>
+        <span class="tab-count" id="badge-proj-count">0</span>
+      </button>
+      <button class="tab-item" onclick="navigate('tab-certs', this)">
+        <span>Credentials &amp; Certs</span>
+        <span class="tab-count" id="badge-cert-count">0</span>
+      </button>
+      <button class="tab-item" onclick="navigate('tab-inbox', this)">
+        <span>Incoming Messages</span>
+        <span class="tab-count" id="badge-msg-count">0</span>
+      </button>
+      <button class="tab-item" onclick="navigate('tab-broadcast', this)">
+        <span>Live Banner Notice</span>
+      </button>
+      <button class="tab-item" onclick="navigate('tab-audit', this)">
+        <span>Security Telemetry</span>
+      </button>
+    </aside>
+
+    <!-- Main Content Panels -->
+    <main class="main-view">
+
+      <!-- ==========================================
+           TAB 1: BIO & HERO MANAGEMENT
+           ========================================== -->
+      <section class="view-panel active" id="tab-bio">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Editorial &amp; Bio Management</h1>
+            <p class="panel-sub">Control your headline, credentials, and digital footprint in real time.</p>
+          </div>
+          <button class="btn-cyan" onclick="saveBioData()">DEPLOY UPDATES</button>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">Primary Hero Metadata</div>
+          <div class="grid-2">
+            <div class="field-group">
+              <label class="field-label">Display Name</label>
+              <input type="text" id="bio-name"/>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Affiliation / Degree Badge</label>
+              <input type="text" id="bio-badge"/>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Main Hero Headline</label>
+            <input type="text" id="bio-headline"/>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Subheadline (Mission Statement)</label>
+            <input type="text" id="bio-subheadline"/>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Digital Tagline / Handle</label>
+            <input type="text" id="bio-tagline"/>
+          </div>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">About Narrative &amp; Education</div>
+          <div class="field-group">
+            <label class="field-label">University / Institution</label>
+            <input type="text" id="bio-university"/>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Professional Narrative (About Section Bio)</label>
+            <textarea id="bio-aboutText" rows="4"></textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Collaboration Status</label>
+            <input type="text" id="bio-statusText"/>
+          </div>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">Transmission &amp; Social Endpoints</div>
+          <div class="grid-3">
+            <div class="field-group">
+              <label class="field-label">Contact Email</label>
+              <input type="email" id="bio-email"/>
+            </div>
+            <div class="field-group">
+              <label class="field-label">LinkedIn URI</label>
+              <input type="url" id="bio-linkedin"/>
+            </div>
+            <div class="field-group">
+              <label class="field-label">GitHub URI</label>
+              <input type="url" id="bio-github"/>
+            </div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button class="btn-cyan" onclick="saveBioData()">DEPLOY UPDATES</button>
+          <button class="btn-ghost" onclick="resetBioDefaults()">RESTORE DEFAULT PROFILE</button>
+          <span class="sync-badge" id="bio-sync-status">DEPLOYED &amp; BROADCASTED TO LIVE SITE</span>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           TAB 2: PROJECTS MANAGEMENT
+           ========================================== -->
+      <section class="view-panel" id="tab-projects">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Portfolio Projects Registry</h1>
+            <p class="panel-sub">Add, customize, toggle, or remove engineering projects from the portfolio.</p>
+          </div>
+          <button class="btn-cyan" onclick="openNewProjectModal()">+ REGISTER PROJECT</button>
+        </div>
+
+        <div id="projects-registry-list"></div>
+
+        <div class="action-bar" style="margin-top:20px">
+          <button class="btn-ghost" onclick="resetDefaultProjects()">RESTORE BUILT-IN PROJECTS</button>
+          <span class="sync-badge" id="proj-sync-status">PROJECT REGISTRY SYNCHRONIZED</span>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           TAB 3: CERTIFICATIONS & CREDENTIALS
+           ========================================== -->
+      <section class="view-panel" id="tab-certs">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Verified Credentials &amp; Certifications</h1>
+            <p class="panel-sub">Inspect and manage Cisco, Microsoft, and National Security certifications.</p>
+          </div>
+          <button class="btn-cyan" onclick="openNewCertModal()">+ REGISTER CREDENTIAL</button>
+        </div>
+
+        <div id="certs-registry-list"></div>
+
+        <div class="action-bar" style="margin-top:20px">
+          <button class="btn-ghost" onclick="resetDefaultCerts()">RESTORE BUILT-IN CREDENTIALS</button>
+          <span class="sync-badge" id="cert-sync-status">CREDENTIALS REGISTRY SYNCHRONIZED</span>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           TAB 4: INCOMING TRANSMISSIONS (INBOX)
+           ========================================== -->
+      <section class="view-panel" id="tab-inbox">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Incoming Contact Transmissions</h1>
+            <p class="panel-sub">Direct submissions from the public portfolio contact interface.</p>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn-ghost" onclick="exportInboxJson()">EXPORT DATA (JSON)</button>
+            <button class="btn-danger" onclick="purgeInbox()">PURGE INBOX</button>
+          </div>
+        </div>
+
+        <div id="inbox-feed"></div>
+      </section>
+
+      <!-- ==========================================
+           TAB 5: LIVE BANNER BROADCAST
+           ========================================== -->
+      <section class="view-panel" id="tab-broadcast">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Live Global Broadcast Notice</h1>
+            <p class="panel-sub">Publish a real-time banner notice displayed across the entire portfolio.</p>
+          </div>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">Notice Payload</div>
+          <div class="field-group">
+            <label class="field-label">Broadcast Text Message</label>
+            <textarea id="notice-input" rows="3" placeholder="e.g. Currently reviewing select software engineering and security architecture inquiries."></textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Live Preview On Public Site</label>
+            <div id="notice-hud-preview" style="background:#050b14;border:1px solid rgba(56,189,248,0.3);border-radius:4px;padding:14px;color:var(--cyan);font-size:12px;letter-spacing:1px">
+              No active broadcast notice.
+            </div>
+          </div>
+          <div class="action-bar">
+            <button class="btn-cyan" onclick="publishNotice()">BROADCAST TO LIVE SITE</button>
+            <button class="btn-danger" onclick="removeNotice()">CLEAR ACTIVE NOTICE</button>
+            <span class="sync-badge" id="notice-sync-status">BROADCAST SIGNAL DEPLOYED</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           TAB 6: SECURITY & AUDIT TELEMETRY
+           ========================================== -->
+      <section class="view-panel" id="tab-audit">
+        <div class="panel-header">
+          <div>
+            <h1 class="panel-title">Security &amp; Audit Telemetry</h1>
+            <p class="panel-sub">Zero-trust access audit trail and cryptographic ledger.</p>
+          </div>
+          <button class="btn-ghost" onclick="clearTelemetry()">PURGE AUDIT LOGS</button>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">System &amp; Cryptographic Architecture</div>
+          <div class="grid-3">
+            <div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Auth Standard</div>
+              <div style="font-size:13px;font-weight:700;color:var(--cyan);margin-top:4px">2-Step Challenge (SHA-256)</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Storage Sync</div>
+              <div style="font-size:13px;font-weight:700;color:var(--green);margin-top:4px">BroadcastChannel + Storage</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Session Longevity</div>
+              <div style="font-size:13px;font-weight:700;color:var(--text);margin-top:4px">8.00 Hours</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-card">
+          <div class="card-title">Security Event Audit Trail</div>
+          <div id="audit-log-feed"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<script>
+// =====================================================================
+// SECURITY KEYS & CONSTANTS
+// =====================================================================
+const HASH_TARGET = '2451eafa3bfdda3304a11ef509d6203308d249972b3d93e6ef9a4d0559d9bfab'; // dev@0987
+const SECRET_LETTER_HASH = '043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89'; // 's'
+
+const KEYS = {
+  bio:       'devault_custom_bio',
+  projects:  'devault_custom_projects',
+  certs:     'devault_custom_certs',
+  msgs:      'devault-secure-inbox',
+  notice:    'devault_public_notice',
+  session:   'devault_admin_session',
+  telemetry: 'devault_telemetry'
+};
+
+const SYNC_CHANNEL = new BroadcastChannel('devault_portfolio_sync');
+
+async function sha256(str) {
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// =====================================================================
+// AUTHENTICATION HUD
+// =====================================================================
+document.getElementById('pwd-input').addEventListener('keydown', e => { if (e.key === 'Enter') authStep1(); });
+document.getElementById('answer-input').addEventListener('keydown', e => { if (e.key === 'Enter') authStep2(); });
+
+// Auto-check active session
+(function(){
+  const sess = localStorage.getItem(KEYS.session);
+  if(sess){
+    try{
+      const d = JSON.parse(sess);
+      if(d.exp > Date.now()){ grantAccess(); return; }
+    }catch(e){}
+    localStorage.removeItem(KEYS.session);
+  }
+})();
+
+async function authStep1() {
+  const pwd = document.getElementById('pwd-input').value;
+  if (!pwd) { setLoginMsg('Enter master password'); return; }
+  const h = await sha256(pwd);
+  if (h === HASH_TARGET) {
+    setLoginMsg('');
+    document.getElementById('stage-pass').style.display = 'none';
+    document.getElementById('stage-2fa').style.display = 'block';
+    document.getElementById('track-2').classList.add('active');
+    setTimeout(() => document.getElementById('answer-input').focus(), 100);
+    recordAudit('STEP1_PASS', 'Master key verified');
+  } else {
+    setLoginMsg('Invalid master password');
+    recordAudit('AUTH_FAIL', 'Step 1 rejected');
+  }
+}
+
+function backToStep1() {
+  document.getElementById('stage-2fa').style.display = 'none';
+  document.getElementById('stage-pass').style.display = 'block';
+  document.getElementById('track-2').classList.remove('active');
+  setLoginMsg('');
+}
+
+async function authStep2() {
+  const ans = document.getElementById('answer-input').value.trim().toLowerCase();
+  if (!ans) { setLoginMsg('Type challenge answer'); return; }
+  const h = await sha256(ans);
+  if (h === SECRET_LETTER_HASH) {
+    const session = { exp: Date.now() + 8*3600*1000, loggedIn: new Date().toISOString() };
+    localStorage.setItem(KEYS.session, JSON.stringify(session));
+    grantAccess();
+  } else {
+    setLoginMsg('Challenge verification failed');
+    recordAudit('AUTH_FAIL', 'Challenge rejected');
+  }
+}
+
+function setLoginMsg(msg) {
+  document.getElementById('login-msg').textContent = msg;
+}
+
+function grantAccess() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('admin-shell').style.display = 'flex';
+  initAllPanels();
+  recordAudit('SESSION_START', 'Admin session active');
+}
+
+function logoutSession() {
+  localStorage.removeItem(KEYS.session);
+  location.reload();
+}
+
+// =====================================================================
+// NAVIGATION TABS
+// =====================================================================
+function navigate(panelId, btn) {
+  document.querySelectorAll('.tab-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(panelId).classList.add('active');
+
+  if (panelId === 'tab-projects') renderProjectsRegistry();
+  if (panelId === 'tab-certs') renderCertsRegistry();
+  if (panelId === 'tab-inbox') renderInbox();
+  if (panelId === 'tab-audit') renderAuditLog();
+}
+
+function initAllPanels() {
+  loadBioData();
+  renderProjectsRegistry();
+  renderCertsRegistry();
+  renderInbox();
+  loadNoticeData();
+  renderAuditLog();
+}
+
+// =====================================================================
+// BIO EDITORIAL
+// =====================================================================
+const BIO_DEFAULTS = {
+  name: 'YAHIA ELSEMARY',
+  badge: 'AASTMT • CYBER & CREATIVE ENGINEERING',
+  headline: 'I BUILD WHAT\'S NEXT.',
+  subheadline: 'Creative Developer exploring the intersection of design, engineering, and technology.',
+  tagline: 'DEVAULT // CREATIVE DEV',
+  aboutText: 'Computer engineering undergraduate at the Arab Academy for Science, Technology and Maritime Transport (AASTMT, 2025–Present). Specialized in offensive cybersecurity, WebAR graphics shaders, full-stack architecture, and autonomous AI agents.',
+  university: 'Arab Academy for Science, Technology and Maritime Transport (AASTMT)',
+  statusText: 'Available for high-impact engineering & security collaborations',
+  linkedinUrl: 'https://www.linkedin.com/in/yahia-elsemary-a11930399/',
+  githubUrl: 'https://github.com/BlackstarII',
+  email: 'yaworke@gmail.com'
+};
+
+const BIO_FIELDS = ['name','badge','headline','subheadline','tagline','aboutText','university','statusText','email','linkedinUrl','githubUrl'];
+
+function loadBioData() {
+  const saved = JSON.parse(localStorage.getItem(KEYS.bio) || '{}');
+  BIO_FIELDS.forEach(f => {
+    const el = document.getElementById('bio-' + f.replace('Url',''));
+    if (el) el.value = saved[f] ?? BIO_DEFAULTS[f] ?? '';
+  });
+}
+
+function saveBioData() {
+  const bio = {};
+  BIO_FIELDS.forEach(f => {
+    const el = document.getElementById('bio-' + f.replace('Url',''));
+    if (el) bio[f] = el.value;
+  });
+  localStorage.setItem(KEYS.bio, JSON.stringify(bio));
+  broadcastState();
+  flashStatus('bio-sync-status');
+  recordAudit('BIO_UPDATE', 'Profile editorial updated');
+}
+
+function resetBioDefaults() {
+  if (!confirm('Revert profile to default values?')) return;
+  localStorage.removeItem(KEYS.bio);
+  loadBioData();
+  broadcastState();
+  flashStatus('bio-sync-status');
+}
+
+// =====================================================================
+// PROJECTS REGISTRY
+// =====================================================================
+const BUILTIN_PROJECTS = [
+  { id:'saqrwear', title:'SAQRWEAR — Full-Stack Luxury Platform', category:'web', tagline:'Full-stack e-commerce ecosystem with two-way frontend-backend synchronization.' },
+  { id:'mystic-arts', title:'Mystic Arts AR — Doctor Strange Spellcasting', category:'ai', tagline:'Real-time gesture-driven spellcasting using vanilla JS and MediaPipe tracking.' },
+  { id:'paperx', title:'PAPERX — Financial Paper Trading Platform', category:'web', tagline:'Algorithmic price charting, order book depth, and portfolio P&L simulation.' },
+  { id:'mark65', title:'MARK 65 / JARVIS — Cyber Desktop Agent', category:'ai', tagline:'Autonomous assistant with WebSocket audio streaming and hardware monitoring.' },
+  { id:'orbit', title:'Orbit Academy — EdTech Platform', category:'web', tagline:'Modern course management with student progress analytics.' },
+  { id:'honeypot', title:'AI Adaptive Honeypot — Deception Architecture', category:'cyber', tagline:'High-interaction honeypot system for proactive threat intelligence.' }
+];
+
+function getProjects() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.projects)) || BUILTIN_PROJECTS;
+  } catch {
+    return BUILTIN_PROJECTS;
+  }
+}
+
+function renderProjectsRegistry() {
+  const projs = getProjects();
+  document.getElementById('badge-proj-count').textContent = projs.length;
+  const container = document.getElementById('projects-registry-list');
+
+  container.innerHTML = projs.map((p, idx) => `
+    <div class="project-row">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="tag-pill">${escapeHtml(p.category || 'web').toUpperCase()}</span>
+          <span class="proj-title">${escapeHtml(p.title)}</span>
+        </div>
+        <div class="proj-tagline" style="margin-top:4px">${escapeHtml(p.tagline || '')}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-ghost" style="padding:6px 12px;font-size:10px" onclick="editProjectTitle(${idx})">EDIT</button>
+        <button class="btn-danger" style="padding:6px 12px;font-size:10px" onclick="removeProject(${idx})">DELETE</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openNewProjectModal() {
+  const title = prompt('Enter Project Title:');
+  if (!title) return;
+  const category = prompt('Category (web / cyber / ai / design):', 'web') || 'web';
+  const tagline = prompt('Short Description / Tagline:') || '';
+
+  const projs = getProjects();
+  projs.unshift({
+    id: 'proj-' + Date.now(),
+    title,
+    category,
+    tagline,
+    summary: tagline,
+    coverImage: '',
+    technologies: ['TypeScript', 'React'],
+    status: 'Completed',
+    featured: true
+  });
+
+  localStorage.setItem(KEYS.projects, JSON.stringify(projs));
+  renderProjectsRegistry();
+  broadcastState();
+  flashStatus('proj-sync-status');
+  recordAudit('PROJECT_ADD', `Added: ${title}`);
+}
+
+function editProjectTitle(idx) {
+  const projs = getProjects();
+  const current = projs[idx];
+  const newTitle = prompt('Update Project Title:', current.title);
+  if (!newTitle) return;
+  const newTagline = prompt('Update Tagline:', current.tagline || '');
+  current.title = newTitle;
+  current.tagline = newTagline;
+
+  localStorage.setItem(KEYS.projects, JSON.stringify(projs));
+  renderProjectsRegistry();
+  broadcastState();
+  flashStatus('proj-sync-status');
+}
+
+function removeProject(idx) {
+  const projs = getProjects();
+  const deleted = projs[idx];
+  if (!confirm(`Delete project "${deleted.title}"?`)) return;
+  projs.splice(idx, 1);
+  localStorage.setItem(KEYS.projects, JSON.stringify(projs));
+  renderProjectsRegistry();
+  broadcastState();
+  flashStatus('proj-sync-status');
+  recordAudit('PROJECT_DEL', `Deleted: ${deleted.title}`);
+}
+
+function resetDefaultProjects() {
+  if (!confirm('Revert projects list to default configuration?')) return;
+  localStorage.removeItem(KEYS.projects);
+  renderProjectsRegistry();
+  broadcastState();
+  flashStatus('proj-sync-status');
+}
+
+// =====================================================================
+// CREDENTIALS & CERTS REGISTRY
+// =====================================================================
+const BUILTIN_CERTS = [
+  { id:'cisco-ethical-hacker', title:'Cisco Ethical Hacker', issuer:'Cisco Networking Academy', date:'October 2026', type:'Certification' },
+  { id:'military-academy', title:'National Security & Strategic Studies', issuer:'Military Academy', date:'June 2026', type:'Credential of Honor' },
+  { id:'microsoft-ai-900', title:'Microsoft Certified: Azure AI (AI-900)', issuer:'Microsoft', date:'March 2026', type:'Official Certification' },
+  { id:'microsoft-auth', title:'Authentication & Authorization in Cybersecurity', issuer:'Microsoft', date:'February 2026', type:'Specialized Credential' }
+];
+
+function getCerts() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.certs)) || BUILTIN_CERTS;
+  } catch {
+    return BUILTIN_CERTS;
+  }
+}
+
+function renderCertsRegistry() {
+  const certs = getCerts();
+  document.getElementById('badge-cert-count').textContent = certs.length;
+  const container = document.getElementById('certs-registry-list');
+
+  container.innerHTML = certs.map((c, idx) => `
+    <div class="project-row">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="tag-pill">${escapeHtml(c.type || 'CERT').toUpperCase()}</span>
+          <span class="proj-title">${escapeHtml(c.title)}</span>
+        </div>
+        <div class="proj-tagline" style="margin-top:4px">${escapeHtml(c.issuer)} • ${escapeHtml(c.date || '')}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-ghost" style="padding:6px 12px;font-size:10px" onclick="editCert(${idx})">EDIT</button>
+        <button class="btn-danger" style="padding:6px 12px;font-size:10px" onclick="removeCert(${idx})">DELETE</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openNewCertModal() {
+  const title = prompt('Enter Certification Title:');
+  if (!title) return;
+  const issuer = prompt('Issuing Organization (e.g. Cisco, Microsoft):', 'Cisco Networking Academy') || 'Credential Authority';
+  const date = prompt('Issue Date (e.g. November 2026):', '2026') || '';
+
+  const certs = getCerts();
+  certs.unshift({
+    id: 'cert-' + Date.now(),
+    title,
+    issuer,
+    date,
+    type: 'Certification',
+    description: 'Verified professional qualification in cybersecurity & computing.',
+    skills: ['Cybersecurity', 'Systems Architecture']
+  });
+
+  localStorage.setItem(KEYS.certs, JSON.stringify(certs));
+  renderCertsRegistry();
+  broadcastState();
+  flashStatus('cert-sync-status');
+  recordAudit('CERT_ADD', `Added: ${title}`);
+}
+
+function editCert(idx) {
+  const certs = getCerts();
+  const c = certs[idx];
+  const newTitle = prompt('Update Certification Title:', c.title);
+  if (!newTitle) return;
+  const newIssuer = prompt('Update Issuer:', c.issuer);
+  c.title = newTitle;
+  if (newIssuer) c.issuer = newIssuer;
+
+  localStorage.setItem(KEYS.certs, JSON.stringify(certs));
+  renderCertsRegistry();
+  broadcastState();
+  flashStatus('cert-sync-status');
+}
+
+function removeCert(idx) {
+  const certs = getCerts();
+  const c = certs[idx];
+  if (!confirm(`Delete credential "${c.title}"?`)) return;
+  certs.splice(idx, 1);
+  localStorage.setItem(KEYS.certs, JSON.stringify(certs));
+  renderCertsRegistry();
+  broadcastState();
+  flashStatus('cert-sync-status');
+  recordAudit('CERT_DEL', `Deleted: ${c.title}`);
+}
+
+function resetDefaultCerts() {
+  if (!confirm('Revert credentials list to default?')) return;
+  localStorage.removeItem(KEYS.certs);
+  renderCertsRegistry();
+  broadcastState();
+  flashStatus('cert-sync-status');
+}
+
+// =====================================================================
+// INBOX & TRANSMISSIONS
+// =====================================================================
+function getInbox() {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS.msgs)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function renderInbox() {
+  const msgs = getInbox();
+  document.getElementById('badge-msg-count').textContent = msgs.length;
+  const container = document.getElementById('inbox-feed');
+
+  if (!msgs.length) {
+    container.innerHTML = '<div class="empty-banner">NO TRANSMISSIONS LOGGED IN SECURE INBOX.</div>';
+    return;
+  }
+
+  container.innerHTML = msgs.slice().reverse().map((m, idx) => `
+    <div class="message-card">
+      <div class="msg-top">
+        <div>
+          <span class="msg-from">${escapeHtml(m.name || 'Anonymous')}</span>
+          <span class="msg-email">&lt;${escapeHtml(m.email || 'No email')}&gt;</span>
+        </div>
+        <span style="color:var(--text-muted);font-size:11px">${new Date(m.timestamp || Date.now()).toLocaleString()}</span>
+      </div>
+      <div class="msg-content">${escapeHtml(m.message || '')}</div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <a href="mailto:${escapeHtml(m.email)}?subject=Re:%20Transmission%20via%20DEVAULT" class="btn-cyan" style="font-size:10px;padding:5px 12px;text-decoration:none">
+          REPLY VIA CLIENT &rarr;
+        </a>
+      </div>
+    </div>
+  `).join('');
+}
+
+function exportInboxJson() {
+  const msgs = getInbox();
+  const blob = new Blob([JSON.stringify(msgs, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `devault-transmissions-${Date.now()}.json`;
+  a.click();
+}
+
+function purgeInbox() {
+  if (!confirm('Permanently wipe all logged transmissions?')) return;
+  localStorage.removeItem(KEYS.msgs);
+  renderInbox();
+  recordAudit('INBOX_PURGE', 'All messages cleared');
+}
+
+// =====================================================================
+// LIVE BROADCAST BANNER
+// =====================================================================
+function loadNoticeData() {
+  const val = localStorage.getItem(KEYS.notice) || '';
+  document.getElementById('notice-input').value = val;
+  updateNoticePreview(val);
+}
+
+document.getElementById('notice-input')?.addEventListener('input', function() {
+  updateNoticePreview(this.value);
+});
+
+function updateNoticePreview(val) {
+  const el = document.getElementById('notice-hud-preview');
+  el.textContent = val.trim() || 'No active broadcast notice.';
+}
+
+function publishNotice() {
+  const val = document.getElementById('notice-input').value.trim();
+  localStorage.setItem(KEYS.notice, val);
+  broadcastState();
+  flashStatus('notice-sync-status');
+  recordAudit('NOTICE_PUBLISH', val ? `Broadcast: ${val.substring(0,30)}...` : 'Notice cleared');
+}
+
+function removeNotice() {
+  localStorage.removeItem(KEYS.notice);
+  document.getElementById('notice-input').value = '';
+  updateNoticePreview('');
+  broadcastState();
+  flashStatus('notice-sync-status');
+  recordAudit('NOTICE_CLEAR', 'Notice wiped');
+}
+
+// =====================================================================
+// AUDIT & TELEMETRY
+// =====================================================================
+function recordAudit(evt, detail) {
+  const logs = JSON.parse(localStorage.getItem(KEYS.telemetry) || '[]');
+  logs.push({ ts: new Date().toISOString(), evt, detail });
+  if (logs.length > 80) logs.shift();
+  localStorage.setItem(KEYS.telemetry, JSON.stringify(logs));
+}
+
+function renderAuditLog() {
+  const logs = JSON.parse(localStorage.getItem(KEYS.telemetry) || '[]');
+  const container = document.getElementById('audit-log-feed');
+
+  if (!logs.length) {
+    container.innerHTML = '<div class="empty-banner">TELEMETRY REGISTRY IS EMPTY.</div>';
+    return;
+  }
+
+  container.innerHTML = logs.slice().reverse().slice(0, 20).map(l => `
+    <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:11px">
+      <span style="color:var(--cyan);font-weight:700">${escapeHtml(l.evt)} &mdash; <span style="color:var(--text)">${escapeHtml(l.detail)}</span></span>
+      <span style="color:var(--text-muted)">${new Date(l.ts).toLocaleTimeString()}</span>
+    </div>
+  `).join('');
+}
+
+function clearTelemetry() {
+  localStorage.removeItem(KEYS.telemetry);
+  renderAuditLog();
+}
+
+// =====================================================================
+// BROADCAST STATE SYNCHRONIZATION
+// =====================================================================
+function broadcastState() {
+  const payload = {
+    type: 'SYNC_ALL',
+    bio: JSON.parse(localStorage.getItem(KEYS.bio) || '{}'),
+    projects: getProjects(),
+    certs: getCerts(),
+    notice: localStorage.getItem(KEYS.notice) || ''
+  };
+  SYNC_CHANNEL.postMessage(payload);
+}
+
+// =====================================================================
+// UTILITIES
+// =====================================================================
+function escapeHtml(str) {
+  if (!str) return '';
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function flashStatus(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.opacity = '1';
+  setTimeout(() => el.style.opacity = '0', 2500);
+}
+</script>
+</body>
+</html>
